@@ -64,13 +64,23 @@ class CommandThread(threading.Thread):
 
 class RemoteEditingCommand():
     def run_command(self, command, callback=None):
-        subprocess.Popen(command, stdout=subprocess.PIPE)
-        thread = CommandThread(command, self.generic_done)
+        if not callback:
+            callback = self.generic_done
+
+        thread = CommandThread(command, callback)
         thread.start()
 
     def generic_done(self, result):
-        self.window.open_file('/home/aaron/workspace/nohup.out')
+        pass
 
 class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
     def run(self):
-        self.run_command(['scp', 'test1:nohup.out', '/home/aaron/workspace'])
+        self.run_command(['scp', 'test1:nohup.out', '/home/aaron/workspace'], callback=self.on_scp_done)
+
+    def on_scp_done(self, result):
+        print 'haha'
+        self.window.open_file('/home/aaron/workspace/nohup.out')
+
+class UploadOnSave(RemoteEditingCommand, sublime_plugin.EventListener):
+    def on_post_save(self, view):
+        self.run_command(['scp', '/home/aaron/workspace/nohup.out', 'test1:'])
