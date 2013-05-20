@@ -1,0 +1,6 @@
+[
+  {
+    "caption": "RemoteEditing: Open Remote File",
+    "command": "open_remote_file"
+  }
+]

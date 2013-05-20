@@ -1,59 +1,53 @@
 import sublime
 import sublime_plugin
 import os
+import os.path
+import functools
 import threading
 import subprocess
-import functools
+
+TMP_DIR = '~/.sublime/RemoteEditing'
+
 
 def main_thread(callback, *args, **kwargs):
     # sublime.set_timeout gets used to send things onto the main thread
     # most sublime.[something] calls need to be on the main thread
     sublime.set_timeout(functools.partial(callback, *args, **kwargs), 0)
 
-def _make_text_safeish(text, fallback_encoding, method='decode'):
-    # The unicode decode here is because sublime converts to unicode inside
-    # insert in such a way that unknown characters will cause errors, which is
-    # distinctly non-ideal... and there's no way to tell what's coming out of
-    # git in output. So...
-    try:
-        unitext = getattr(text, method)('utf-8')
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        unitext = getattr(text, method)(fallback_encoding)
-    return unitext
 
 class CommandThread(threading.Thread):
-    def __init__(self, command, on_done, working_dir="", fallback_encoding="", **kwargs):
+    def __init__(self, command, on_done, **kwargs):
         threading.Thread.__init__(self)
         self.command = command
         self.on_done = on_done
-        self.working_dir = working_dir
+
         if "stdin" in kwargs:
             self.stdin = kwargs["stdin"]
         else:
             self.stdin = None
+
         if "stdout" in kwargs:
             self.stdout = kwargs["stdout"]
         else:
             self.stdout = subprocess.PIPE
-        self.fallback_encoding = fallback_encoding
+
         self.kwargs = kwargs
 
     def run(self):
         try:
-                shell = os.name == 'nt'
-
-                proc = subprocess.Popen(self.command,
-                    stdout=self.stdout, stderr=subprocess.STDOUT,
-                    stdin=subprocess.PIPE,
-                    shell=shell, universal_newlines=True)
-                output = proc.communicate(self.stdin)[0]
-                if not output:
-                    output = ''
-                # if sublime's python gets bumped to 2.7 we can just do:
-                # output = subprocess.check_output(self.command)
-                main_thread(self.on_done,
-                    _make_text_safeish(output, self.fallback_encoding), **self.kwargs)
-
+            proc = subprocess.Popen(str.join(' ', self.command),
+                                    stdout=self.stdout,
+                                    stderr=subprocess.STDOUT,
+                                    stdin=subprocess.PIPE,
+                                    shell=True,
+                                    universal_newlines=True)
+            # if sublime's python gets bumped to 2.7 we can just do:
+            # output = subprocess.check_output(self.command)
+            output = proc.communicate(self.stdin)[0]
+            if not output:
+                output = ''
+            #print output
+            main_thread(self.on_done, output, **self.kwargs)
         except subprocess.CalledProcessError, e:
             main_thread(self.on_done, e.returncode)
         except OSError, e:
@@ -62,25 +56,36 @@ class CommandThread(threading.Thread):
             else:
                 raise e
 
+
 class RemoteEditingCommand():
     def run_command(self, command, callback=None):
         if not callback:
             callback = self.generic_done
-
         thread = CommandThread(command, callback)
         thread.start()
 
     def generic_done(self, result):
         pass
 
+
 class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
     def run(self):
-        self.run_command(['scp', 'test1:nohup.out', '/home/aaron/workspace'], callback=self.on_scp_done)
+        self.window.show_input_panel('Remote path', '', self.open_remote_file, None, None)
 
-    def on_scp_done(self, result):
-        print 'haha'
-        self.window.open_file('/home/aaron/workspace/nohup.out')
+    def open_remote_file(self, remote_path):
+        def on_scp_done(result):
+            tmp_file_name = os.path.basename(remote_path.split(':')[1])
+            view = self.window.open_file(os.path.join(TMP_DIR, tmp_file_name))
+            view.settings().set('RemoteEditing.remote_path', remote_path)
+
+        def on_mkdir_done(result):
+            self.run_command(['scp', remote_path, TMP_DIR], on_scp_done)
+
+        self.run_command(['mkdir', '-p', TMP_DIR], on_mkdir_done)
+
 
 class UploadOnSave(RemoteEditingCommand, sublime_plugin.EventListener):
     def on_post_save(self, view):
-        self.run_command(['scp', '/home/aaron/workspace/nohup.out', 'test1:'])
+        remote_path = view.settings().get('RemoteEditing.remote_path')
+        if remote_path:
+            self.run_command(['scp', view.file_name(), remote_path])
