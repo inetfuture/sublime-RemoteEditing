@@ -74,18 +74,23 @@ class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
 
     def open_remote_file(self, remote_path):
         def on_scp_done(result):
-            tmp_file_name = os.path.basename(remote_path.split(':')[1])
-            view = self.window.open_file(os.path.join(TMP_DIR, tmp_file_name))
+            view = self.window.open_file(os.path.join(TMP_DIR, remote_path))
+            view.set_name(remote_path)
             view.settings().set('RemoteEditing.remote_path', remote_path)
 
         def on_mkdir_done(result):
-            self.run_command(['scp', remote_path, TMP_DIR], on_scp_done)
+            self.run_command(['scp', remote_path, os.path.join(TMP_DIR, remote_path)], on_scp_done)
 
         self.run_command(['mkdir', '-p', TMP_DIR], on_mkdir_done)
 
 
-class UploadOnSave(RemoteEditingCommand, sublime_plugin.EventListener):
+class RemoteEditingEventListener(RemoteEditingCommand, sublime_plugin.EventListener):
     def on_post_save(self, view):
         remote_path = view.settings().get('RemoteEditing.remote_path')
         if remote_path:
             self.run_command(['scp', view.file_name(), remote_path])
+
+    def on_close(self, view):
+        remote_path = view.settings().get('RemoteEditing.remote_path')
+        if remote_path:
+            self.run_command(['rm', os.path.join(TMP_DIR, remote_path)])
