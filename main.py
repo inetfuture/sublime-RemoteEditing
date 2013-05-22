@@ -18,8 +18,13 @@ def main_thread(callback, *args, **kwargs):
 class CommandThread(threading.Thread):
     def __init__(self, command, on_done, **kwargs):
         threading.Thread.__init__(self)
-        self.command = command
         self.on_done = on_done
+        self.kwargs = kwargs
+
+        if isinstance(command, list):
+            self.command = str.join(' ', command)
+        else:
+            self.command = command
 
         if "stdin" in kwargs:
             self.stdin = kwargs["stdin"]
@@ -31,11 +36,10 @@ class CommandThread(threading.Thread):
         else:
             self.stdout = subprocess.PIPE
 
-        self.kwargs = kwargs
-
     def run(self):
         try:
-            proc = subprocess.Popen(str.join(' ', self.command),
+            print self.command
+            proc = subprocess.Popen(self.command,
                                     stdout=self.stdout,
                                     stderr=subprocess.STDOUT,
                                     stdin=subprocess.PIPE,
@@ -43,29 +47,23 @@ class CommandThread(threading.Thread):
                                     universal_newlines=True)
             # if sublime's python gets bumped to 2.7 we can just do:
             # output = subprocess.check_output(self.command)
-            output = proc.communicate(self.stdin)[0]
-            if not output:
-                output = ''
-            #print output
+            output = proc.communicate(self.stdin)[0] or ''
             main_thread(self.on_done, output, **self.kwargs)
-        except subprocess.CalledProcessError, e:
-            main_thread(self.on_done, e.returncode)
-        except OSError, e:
-            if e.errno == 2:
-                main_thread(sublime.error_message, "Git binary could not be found in PATH\n\nConsider using the git_command setting for the Git plugin\n\nPATH is: %s" % os.environ['PATH'])
-            else:
-                raise e
+        except Exception, e:
+            main_thread(sublime.error_message, str(e))
 
 
 class RemoteEditingCommand():
     def run_command(self, command, callback=None):
-        if not callback:
-            callback = self.generic_done
+        callback = callback or self.generic_done
         thread = CommandThread(command, callback)
         thread.start()
 
     def generic_done(self, result):
         pass
+
+    def gen_local_path(self, remote_path):
+        return os.path.join(TMP_DIR, remote_path.replace('/', '_'))
 
 
 class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
@@ -73,24 +71,27 @@ class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
         self.window.show_input_panel('Remote path', '', self.open_remote_file, None, None)
 
     def open_remote_file(self, remote_path):
-        def on_scp_done(result):
-            view = self.window.open_file(os.path.join(TMP_DIR, remote_path))
-            view.set_name(remote_path)
-            view.settings().set('RemoteEditing.remote_path', remote_path)
+        self.remote_path = remote_path
+        self.local_path = self.gen_local_path(remote_path)
+        self.run_command(['mkdir', '-p', TMP_DIR], self.on_mkdir_done)
 
-        def on_mkdir_done(result):
-            self.run_command(['scp', remote_path, os.path.join(TMP_DIR, remote_path)], on_scp_done)
+    def on_mkdir_done(self, result):
+        self.run_command(['scp', self.remote_path, self.local_path], self.on_scp_done)
 
-        self.run_command(['mkdir', '-p', TMP_DIR], on_mkdir_done)
+    def on_scp_done(self, result):
+        view = self.window.open_file(self.local_path)
+        view.settings().set('RemoteEditing.remote_path', self.remote_path)
 
 
 class RemoteEditingEventListener(RemoteEditingCommand, sublime_plugin.EventListener):
     def on_post_save(self, view):
         remote_path = view.settings().get('RemoteEditing.remote_path')
         if remote_path:
-            self.run_command(['scp', view.file_name(), remote_path])
+            local_path = self.gen_local_path(remote_path)
+            self.run_command(['scp', view.file_name(), local_path])
 
     def on_close(self, view):
         remote_path = view.settings().get('RemoteEditing.remote_path')
         if remote_path:
-            self.run_command(['rm', os.path.join(TMP_DIR, remote_path)])
+            local_path = self.gen_local_path(remote_path)
+            self.run_command(['rm', local_path])
