@@ -38,7 +38,6 @@ class CommandThread(threading.Thread):
 
     def run(self):
         try:
-            print self.command
             proc = subprocess.Popen(self.command,
                                     stdout=self.stdout,
                                     stderr=subprocess.STDOUT,
@@ -87,11 +86,9 @@ class RemoteEditingEventListener(RemoteEditingCommand, sublime_plugin.EventListe
     def on_post_save(self, view):
         remote_path = view.settings().get('RemoteEditing.remote_path')
         if remote_path:
-            local_path = self.gen_local_path(remote_path)
-            self.run_command(['scp', view.file_name(), local_path])
+            self.run_command(['scp', view.file_name(), remote_path])
 
     def on_close(self, view):
         remote_path = view.settings().get('RemoteEditing.remote_path')
         if remote_path:
-            local_path = self.gen_local_path(remote_path)
-            self.run_command(['rm', local_path])
+            self.run_command(['rm', view.file_name()])
