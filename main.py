@@ -6,7 +6,8 @@ import functools
 import threading
 import subprocess
 
-TMP_DIR = '~/.sublime/RemoteEditing'
+PLUGIN_NAME = 'RemoteEditing'
+TMP_DIR = '~/.sublime/%s' % PLUGIN_NAME
 
 
 def main_thread(callback, *args, **kwargs):
@@ -79,16 +80,17 @@ class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
 
     def on_scp_done(self, result):
         view = self.window.open_file(self.local_path)
-        view.settings().set('RemoteEditing.remote_path', self.remote_path)
+        view.set_status('%s.remote_path' % PLUGIN_NAME, '[Remote Path]%s' % self.remote_path)
+        view.settings().set('%s.remote_path' % PLUGIN_NAME, self.remote_path)
 
 
 class RemoteEditingEventListener(RemoteEditingCommand, sublime_plugin.EventListener):
     def on_post_save(self, view):
-        remote_path = view.settings().get('RemoteEditing.remote_path')
+        remote_path = view.settings().get('%s.remote_path' % PLUGIN_NAME)
         if remote_path:
             self.run_command(['scp', view.file_name(), remote_path])
 
     def on_close(self, view):
-        remote_path = view.settings().get('RemoteEditing.remote_path')
+        remote_path = view.settings().get('%s.remote_path' % PLUGIN_NAME)
         if remote_path:
             self.run_command(['rm', view.file_name()])
