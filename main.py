@@ -1,13 +1,13 @@
 import sublime
 import sublime_plugin
-import os
-import os.path
 import functools
 import threading
 import subprocess
 
+from os import path
+
 PLUGIN_NAME = 'RemoteEditing'
-TMP_DIR = '~/.sublime/%s' % PLUGIN_NAME
+TMP_DIR = path.expanduser(path.join('~/.sublime', PLUGIN_NAME))
 
 
 def main_thread(callback, *args, **kwargs):
@@ -49,7 +49,7 @@ class CommandThread(threading.Thread):
             # output = subprocess.check_output(self.command)
             output = proc.communicate(self.stdin)[0] or ''
             main_thread(self.on_done, output, **self.kwargs)
-        except Exception, e:
+        except Exception as e:
             main_thread(sublime.error_message, str(e))
 
 
@@ -63,7 +63,7 @@ class RemoteEditingCommand():
         pass
 
     def gen_local_path(self, remote_path):
-        return os.path.join(TMP_DIR, remote_path.replace('/', '_'))
+        return path.join(TMP_DIR, remote_path.replace('/', '_'))
 
 
 class OpenRemoteFileCommand(RemoteEditingCommand, sublime_plugin.WindowCommand):
